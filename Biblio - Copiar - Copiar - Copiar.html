@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Biblioteca Digital</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --accent: #8b5cf6;
+      --accent-hover: #7c3aed;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: #334155;
+      --danger: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 20px; }
+    header { max-width: 1100px; margin: 0 auto 30px; display: flex; gap: 15px; flex-wrap: wrap; justify-content: space-between; align-items: center; }
+    h1 { font-size: 1.8rem; color: var(--accent); }
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; }
+    input, select, textarea { background: var(--border); color: var(--text); border: 1px solid var(--border); padding: 10px 14px; border-radius: 8px; outline: none; width: 100%; }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+    button { background: var(--accent); color: white; border: none; padding: 10px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    button:hover { background: var(--accent-hover); }
+    button.danger { background: var(--danger); }
+    .grid { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
+    .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+    .card img { width: 100%; height: 260px; object-fit: cover; background: var(--border); }
+    .card-body { padding: 15px; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+    .card-title { font-size: 1.1rem; font-weight: bold; }
+    .card-author { font-size: 0.85rem; color: var(--text-muted); }
+    .card-actions { margin-top: auto; padding-top: 10px; display: flex; gap: 8px; }
+    .card-actions a, .card-actions button { flex: 1; text-align: center; text-decoration: none; padding: 8px; border-radius: 6px; font-size: 0.85rem; }
+    .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; padding: 20px; z-index: 100; }
+    .modal { background: var(--card-bg); border: 1px solid var(--border); padding: 24px; border-radius: 12px; max-width: 450px; width: 100%; display: flex; flex-direction: column; gap: 12px; }
+    .preview-container { width: 100%; height: 140px; background: var(--border); border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+    .preview-container img { width: 100%; height: 100%; object-fit: cover; }
+    label { font-size: 0.85rem; color: var(--text-muted); }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>📚 Mi Biblioteca</h1>
+    <div class="controls">
+      <input type="text" id="searchInput" placeholder="Buscar libro..." style="width: auto;">
+      <select id="filterCategory" style="width: auto;"><option value="">Todas las categorías</option></select>
+      <button id="openModalBtn">+ Publicar Libro</button>
+    </div>
+  </header>
+
+  <div class="grid" id="booksGrid"></div>
+
+  <!-- Modal Libro -->
+  <div class="modal-bg" id="bookModal">
+    <div class="modal">
+      <h2 id="modalTitle">Publicar Libro</h2>
+      <input type="hidden" id="bookId">
+      
+      <input type="text" id="titleInput" placeholder="Título del libro">
+      <input type="text" id="authorInput" placeholder="Autor">
+      <input type="text" id="categoryInput" placeholder="Categoría (ej: Fantasía, Ciencia)">
+      
+      <div>
+        <label>Portada (Selecciona una imagen):</label>
+        <input type="file" id="coverFileInput" accept="image/*">
+      </div>
+
+      <div class="preview-container" id="previewBox">
+        <span style="color:var(--text-muted); font-size:0.8rem;">Sin vista previa</span>
+      </div>
+      
+      <input type="url" id="downloadUrlInput" placeholder="URL del archivo/PDF (Drive, Mega, etc.)">
+      <textarea id="descInput" placeholder="Resumen o descripción"></textarea>
+
+      <div style="display:flex; gap:10px; justify-content:flex-end;">
+        <button type="button" class="danger" id="closeModalBtn">Cancelar</button>
+        <button type="button" id="saveBookBtn">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getDatabase, ref, push, set, update, remove, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAiOQJQ8HZgrxjzuNZR-7ZVC7TPjO7QFpo",
+      authDomain: "bibliotec-9ab48.firebaseapp.com",
+      databaseURL: "https://bibliotec-9ab48-default-rtdb.firebaseio.com",
+      projectId: "bibliotec-9ab48",
+      storageBucket: "bibliotec-9ab48.firebasestorage.app",
+      messagingSenderId: "445347279946",
+      appId: "1:445347279946:web:85db061b051ad1888922b3"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const booksRef = ref(db, 'books');
+
+    let allBooks = [];
+    let currentBase64Cover = "";
+
+    // Manejo de imagen
+    document.getElementById('coverFileInput').addEventListener('change', (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        currentBase64Cover = e.target.result;
+        document.getElementById('previewBox').innerHTML = `<img src="${currentBase64Cover}" alt="Vista previa">`;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // Escuchar cambios en Realtime Database
+    onValue(booksRef, (snapshot) => {
+      const data = snapshot.val();
+      allBooks = [];
+      if (data) {
+        Object.keys(data).forEach(id => {
+          allBooks.push({ id, ...data[id] });
+        });
+      }
+      updateCategoriesOptions();
+      renderBooks();
+    }, (error) => {
+      console.error("Error de Firebase:", error);
+    });
+
+    function renderBooks() {
+      const search = document.getElementById('searchInput').value.toLowerCase();
+      const cat = document.getElementById('filterCategory').value;
+      const grid = document.getElementById('booksGrid');
+      grid.innerHTML = '';
+
+      const filtered = allBooks.filter(b => {
+        const matchesSearch = (b.title || '').toLowerCase().includes(search) || (b.author || '').toLowerCase().includes(search);
+        const matchesCat = !cat || b.category === cat;
+        return matchesSearch && matchesCat;
+      });
+
+      filtered.forEach(b => {
+        grid.innerHTML += `
+          <div class="card">
+            <img src="${b.coverBase64 || 'https://via.placeholder.com/200x260?text=Sin+Portada'}" alt="${b.title}">
+            <div class="card-body">
+              <div class="card-title">${b.title}</div>
+              <div class="card-author">${b.author} • <i>${b.category}</i></div>
+              <p style="font-size:0.8rem; color:var(--text-muted);">${b.desc || ''}</p>
+              <div class="card-actions">
+                <a href="${b.downloadUrl}" target="_blank" style="background:var(--accent); color:white;">Descargar</a>
+                <button class="edit-btn" data-id="${b.id}" style="background:var(--border);">Editar</button>
+                <button class="delete-btn danger" data-id="${b.id}">X</button>
+              </div>
+            </div>
+          </div>
+        `;
+      });
+
+      document.querySelectorAll('.edit-btn').forEach(btn => {
+        btn.addEventListener('click', () => editBook(btn.dataset.id));
+      });
+      document.querySelectorAll('.delete-btn').forEach(btn => {
+        btn.addEventListener('click', () => deleteBook(btn.dataset.id));
+      });
+    }
+
+    function updateCategoriesOptions() {
+      const select = document.getElementById('filterCategory');
+      const categories = [...new Set(allBooks.map(b => b.category).filter(Boolean))];
+      select.innerHTML = '<option value="">Todas las categorías</option>' + 
+        categories.map(c => `<option value="${c}">${c}</option>`).join('');
+    }
+
+    // EVENTO DE GUARDAR CON ALERTA DE PRUEBA
+    document.getElementById('saveBookBtn').addEventListener('click', async () => {
+      alert("¡El botón funciona correctamente!"); // <-- Si sale esto, el botón sí responde
+
+      const id = document.getElementById('bookId').value;
+      const title = document.getElementById('titleInput').value.trim();
+      const downloadUrl = document.getElementById('downloadUrlInput').value.trim();
+
+      if (!title || !downloadUrl) {
+        alert("Por lo menos escribe el Título y el Link de descarga.");
+        return;
+      }
+
+      const data = {
+        title,
+        author: document.getElementById('authorInput').value.trim() || 'Desconocido',
+        category: document.getElementById('categoryInput').value.trim() || 'General',
+        coverBase64: currentBase64Cover,
+        downloadUrl,
+        desc: document.getElementById('descInput').value.trim()
+      };
+
+      try {
+        if (id) {
+          await update(ref(db, `books/${id}`), data);
+        } else {
+          const newRef = push(booksRef);
+          await set(newRef, data);
+        }
+        closeModal('bookModal');
+      } catch (err) {
+        console.error("Error al guardar en Firebase:", err);
+        alert("Hubo un error al guardar en Firebase. Revisa la consola (F12).");
+      }
+    });
+
+    window.editBook = (id) => {
+      const b = allBooks.find(item => item.id === id);
+      if (!b) return;
+      document.getElementById('bookId').value = b.id;
+      document.getElementById('titleInput').value = b.title || '';
+      document.getElementById('authorInput').value = b.author || '';
+      document.getElementById('categoryInput').value = b.category || '';
+      document.getElementById('downloadUrlInput').value = b.downloadUrl || '';
+      document.getElementById('descInput').value = b.desc || '';
+      
+      currentBase64Cover = b.coverBase64 || "";
+      const previewBox = document.getElementById('previewBox');
+      if (currentBase64Cover) {
+        previewBox.innerHTML = `<img src="${currentBase64Cover}" alt="Vista previa">`;
+      } else {
+        previewBox.innerHTML = `<span style="color:var(--text-muted); font-size:0.8rem;">Sin vista previa</span>`;
+      }
+
+      document.getElementById('modalTitle').innerText = "Editar Libro";
+      openModal('bookModal');
+    };
+
+    window.deleteBook = async (id) => {
+      if (confirm("¿Estás segura de eliminar este libro?")) {
+        await remove(ref(db, `books/${id}`));
+      }
+    };
+
+    function openModal(modalId) {
+      if (modalId === 'bookModal' && !document.getElementById('bookId').value) {
+        document.getElementById('modalTitle').innerText = "Publicar Libro";
+        ['bookId','titleInput','authorInput','categoryInput','downloadUrlInput','descInput','coverFileInput'].forEach(i => {
+          const el = document.getElementById(i);
+          if (el) el.value = '';
+        });
+        currentBase64Cover = "";
+        document.getElementById('previewBox').innerHTML = `<span style="color:var(--text-muted); font-size:0.8rem;">Sin vista previa</span>`;
+      }
+      document.getElementById(modalId).style.display = 'flex';
+    }
+
+    function closeModal(modalId) {
+      document.getElementById(modalId).style.display = 'none';
+    }
+
+    document.getElementById('openModalBtn').addEventListener('click', () => openModal('bookModal'));
+    document.getElementById('closeModalBtn').addEventListener('click', () => closeModal('bookModal'));
+    document.getElementById('searchInput').addEventListener('input', renderBooks);
+    document.getElementById('filterCategory').addEventListener('change', renderBooks);
+  </script>
+</body>
+</html>
+
